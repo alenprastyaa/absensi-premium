@@ -26,7 +26,34 @@ export class DatabaseService {
         await SchoolModel.sequelize.sync({ alter: true });
         await this.backfillStudentCredentials();
         await this.backfillSubjectWeights();
+        await this.ensureSuperAdminAccount();
         await this.seedIfEmpty();
+    }
+    async ensureSuperAdminAccount() {
+        const salt = bcrypt.genSaltSync(10);
+        const passwordHash = bcrypt.hashSync('admin123', salt);
+        const existing = await UserModel.findOne({ where: { id: 'usr-super' } });
+        if (existing) {
+            await existing.update({
+                schoolId: null,
+                username: 'superadmin',
+                name: 'Budi Santoso (Super Admin)',
+                role: 'super_admin',
+                initialPassword: 'admin123',
+                passwordHash,
+            });
+            return;
+        }
+        await UserModel.create({
+            id: 'usr-super',
+            schoolId: null,
+            username: 'superadmin',
+            name: 'Budi Santoso (Super Admin)',
+            role: 'super_admin',
+            initialPassword: 'admin123',
+            passwordHash,
+            createdAt: new Date(),
+        });
     }
     async backfillSubjectWeights() {
         const subjects = await SubjectModel.findAll();
