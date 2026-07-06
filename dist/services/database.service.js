@@ -383,6 +383,17 @@ export class DatabaseService {
     async createStudentFromImport(schoolId, classId, name, nisn) {
         return this.createStudent(schoolId, classId, name, nisn);
     }
+    async promoteStudents(studentIds, schoolId, targetClassId) {
+        const [updatedCount] = await StudentModel.update({ classId: targetClassId }, {
+            where: {
+                schoolId,
+                id: {
+                    [Op.in]: studentIds,
+                },
+            },
+        });
+        return updatedCount;
+    }
     async deleteStudent(id, schoolId) {
         await StudentModel.destroy({ where: { id, schoolId } });
     }

@@ -570,6 +570,56 @@ async function main() {
     });
   });
 
+  app.post('/api/admin/students/promote', authenticateToken, requireRole(['teacher']), async (req: AuthenticatedRequest, res) => {
+    const schoolId = req.user!.schoolId!;
+    const fromClassId = String(req.body?.fromClassId ?? '').trim();
+    const targetClassId = String(req.body?.targetClassId ?? '').trim();
+    const requestedStudentIds = Array.isArray(req.body?.studentIds)
+      ? req.body.studentIds.map((id: unknown) => String(id).trim()).filter(Boolean)
+      : [];
+
+    if (!fromClassId || !targetClassId) {
+      res.status(400).json({ error: 'Kelas asal dan kelas tujuan wajib dipilih.' });
+      return;
+    }
+
+    if (fromClassId === targetClassId) {
+      res.status(400).json({ error: 'Kelas tujuan harus berbeda dari kelas asal.' });
+      return;
+    }
+
+    const fromClass = await db.getClass(fromClassId, schoolId);
+    const targetClass = await db.getClass(targetClassId, schoolId);
+    if (!fromClass || !targetClass) {
+      res.status(404).json({ error: 'Kelas asal atau kelas tujuan tidak ditemukan.' });
+      return;
+    }
+
+    const schoolStudents = await db.getStudents(schoolId);
+    const promotableStudents = schoolStudents.filter((student) =>
+      student.classId === fromClassId && (requestedStudentIds.length === 0 || requestedStudentIds.includes(student.id))
+    );
+
+    if (promotableStudents.length === 0) {
+      res.status(400).json({ error: 'Tidak ada siswa yang bisa dipromosikan dari kelas asal.' });
+      return;
+    }
+
+    const updatedCount = await db.promoteStudents(
+      promotableStudents.map((student) => student.id),
+      schoolId,
+      targetClassId
+    );
+
+    res.json({
+      success: true,
+      fromClassName: fromClass.name,
+      targetClassName: targetClass.name,
+      totalPromoted: updatedCount,
+      studentIds: promotableStudents.map((student) => student.id),
+    });
+  });
+
   app.put('/api/admin/students/:id', authenticateToken, requireRole(['teacher']), async (req: AuthenticatedRequest, res) => {
     const schoolId = req.user!.schoolId!;
     const { id } = req.params;

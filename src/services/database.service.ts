@@ -485,6 +485,21 @@ export class DatabaseService {
     return this.createStudent(schoolId, classId, name, nisn);
   }
 
+  async promoteStudents(studentIds: string[], schoolId: string, targetClassId: string): Promise<number> {
+    const [updatedCount] = await StudentModel.update(
+      { classId: targetClassId },
+      {
+        where: {
+          schoolId,
+          id: {
+            [Op.in]: studentIds,
+          },
+        },
+      }
+    );
+    return updatedCount;
+  }
+
   async deleteStudent(id: string, schoolId: string) {
     await StudentModel.destroy({ where: { id, schoolId } });
   }
