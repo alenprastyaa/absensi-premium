@@ -285,6 +285,7 @@ export class DatabaseService {
         if (updates.passwordPlain) {
             const salt = bcrypt.genSaltSync(10);
             user.passwordHash = bcrypt.hashSync(updates.passwordPlain, salt);
+            user.initialPassword = updates.passwordPlain;
         }
         await user.save();
         return user.get({ plain: true });

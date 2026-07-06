@@ -19,6 +19,11 @@ const slugify = (value) => value
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '')
     .replace(/^_+|_+$/g, '') || 'sekolah';
+const normalizeComparableText = (value) => value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
 const generateSchoolAdminCredentials = async (schoolName) => {
     const baseUsername = `admin-${slugify(schoolName)}`;
     let username = baseUsername;
@@ -125,7 +130,8 @@ async function main() {
         res.json({ status: 'ok', time: new Date().toISOString() });
     });
     app.post('/api/auth/login', async (req, res) => {
-        const { username, password } = req.body;
+        const username = String(req.body?.username ?? '').trim();
+        const password = String(req.body?.password ?? '').trim();
         if (!username || !password) {
             res.status(400).json({ error: 'Username dan password wajib diisi.' });
             return;
@@ -442,7 +448,8 @@ async function main() {
         const createdStudents = [];
         const skipped = [];
         for (const row of rows) {
-            const cls = classes.find((item) => item.name.toLowerCase() === row.className.toLowerCase());
+            const normalizedClassName = normalizeComparableText(row.className);
+            const cls = classes.find((item) => normalizeComparableText(item.name) === normalizedClassName);
             if (!cls) {
                 skipped.push({ name: row.name, reason: `Kelas "${row.className}" tidak ditemukan` });
                 continue;
