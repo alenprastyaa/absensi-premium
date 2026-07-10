@@ -168,6 +168,14 @@ async function main() {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
+  app.get('/api/public/pricing-plans', async (req, res) => {
+    res.json(await db.getPricingPlans(true));
+  });
+
+  app.get('/api/public/settings', async (req, res) => {
+    res.json(await db.getSiteSettings());
+  });
+
   app.post('/api/auth/login', async (req, res) => {
     const username = String(req.body?.username ?? '').trim();
     const password = String(req.body?.password ?? '').trim();
@@ -361,6 +369,82 @@ async function main() {
     }
     await db.deleteSchool(id);
     res.json({ success: true, message: `Sekolah ${school.name} berhasil dihapus beserta seluruh datanya.` });
+  });
+
+  app.get('/api/superadmin/pricing-plans', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    res.json(await db.getPricingPlans());
+  });
+
+  app.post('/api/superadmin/pricing-plans', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    const { name, price, period, description, features, isHighlighted, isActive, sortOrder } = req.body;
+    if (!name || !price || !period) {
+      res.status(400).json({ error: 'Nama, harga, dan periode paket wajib diisi.' });
+      return;
+    }
+
+    const created = await db.createPricingPlan({
+      name,
+      price,
+      period,
+      description: description ?? '',
+      features: Array.isArray(features) ? features.map((f: unknown) => String(f)) : [],
+      isHighlighted: isHighlighted === true,
+      isActive: isActive !== false,
+      sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
+    });
+    res.status(201).json(created);
+  });
+
+  app.put('/api/superadmin/pricing-plans/:id', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    const { id } = req.params;
+    const { name, price, period, description, features, isHighlighted, isActive, sortOrder } = req.body;
+    if (!name || !price || !period) {
+      res.status(400).json({ error: 'Nama, harga, dan periode paket wajib diisi.' });
+      return;
+    }
+
+    const updated = await db.updatePricingPlan(id, {
+      name,
+      price,
+      period,
+      description: description ?? '',
+      features: Array.isArray(features) ? features.map((f: unknown) => String(f)) : [],
+      isHighlighted: isHighlighted === true,
+      isActive: isActive !== false,
+      sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
+    });
+
+    if (!updated) {
+      res.status(404).json({ error: 'Paket tidak ditemukan.' });
+      return;
+    }
+    res.json(updated);
+  });
+
+  app.delete('/api/superadmin/pricing-plans/:id', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    const deleted = await db.deletePricingPlan(req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Paket tidak ditemukan.' });
+      return;
+    }
+    res.json({ success: true, message: 'Paket berhasil dihapus.' });
+  });
+
+  app.get('/api/superadmin/settings', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    res.json(await db.getSiteSettings());
+  });
+
+  app.put('/api/superadmin/settings', authenticateToken, requireRole(['super_admin']), async (req, res) => {
+    const { whatsappNumber, whatsappMessageTemplate } = req.body;
+    if (!whatsappNumber) {
+      res.status(400).json({ error: 'Nomor WhatsApp wajib diisi.' });
+      return;
+    }
+    const updated = await db.updateSiteSettings({
+      whatsappNumber,
+      whatsappMessageTemplate: whatsappMessageTemplate ?? '',
+    });
+    res.json(updated);
   });
 
   app.get('/api/admin/classes', authenticateToken, requireRole(['admin', 'teacher']), async (req: AuthenticatedRequest, res) => {

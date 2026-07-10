@@ -127,3 +127,21 @@ export interface AssessmentWithDetails extends Assessment {
   className: string;
   subjectName: string;
 }
+
+export interface PricingPlan {
+  id: string;
+  name: string;
+  price: string;
+  period: string;
+  description: string;
+  features: string[];
+  isHighlighted: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface SiteSettings {
+  whatsappNumber: string;
+  whatsappMessageTemplate: string;
+}

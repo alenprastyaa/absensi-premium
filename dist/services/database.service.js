@@ -1,7 +1,7 @@
 // @ts-nocheck
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
-import { AcademicYearModel, AssessmentModel, AssessmentWeightModel, AttendanceModel, ClassModel, SchoolModel, StudentGradeModel, StudentModel, SubjectModel, UserModel, initModels, } from '../models.js';
+import { AcademicYearModel, AssessmentModel, AssessmentWeightModel, AttendanceModel, ClassModel, PricingPlanModel, SchoolModel, SiteSettingModel, StudentGradeModel, StudentModel, SubjectModel, UserModel, initModels, } from '../models.js';
 import { randomId } from '../utils/id.js';
 const slugify = (value) => value
     .toLowerCase()
@@ -28,6 +28,76 @@ export class DatabaseService {
         await this.backfillSubjectWeights();
         await this.ensureSuperAdminAccount();
         await this.seedIfEmpty();
+        await this.seedPricingPlansIfEmpty();
+        await this.ensureSiteSettings();
+    }
+    async seedPricingPlansIfEmpty() {
+        const count = await PricingPlanModel.count();
+        if (count > 0)
+            return;
+        await PricingPlanModel.bulkCreate([
+            {
+                id: this.genId('plan'),
+                name: 'Bulanan',
+                price: '150.000',
+                period: '/ bulan',
+                description: 'Cocok untuk sekolah yang ingin mencoba dahulu.',
+                features: JSON.stringify([
+                    'Absensi QR & manual',
+                    'Data guru dan siswa',
+                    'Rekap bulanan',
+                    'Dukungan via WhatsApp',
+                ]),
+                isHighlighted: false,
+                isActive: true,
+                sortOrder: 1,
+                createdAt: new Date(),
+            },
+            {
+                id: this.genId('plan'),
+                name: 'Tahunan',
+                price: '1.200.000',
+                period: '/ tahun',
+                description: 'Paling banyak dipilih sekolah untuk pemakaian jangka panjang.',
+                features: JSON.stringify([
+                    'Semua fitur paket Bulanan',
+                    'Modul akademik & nilai',
+                    'Ekspor laporan CSV/PDF',
+                    'Prioritas dukungan',
+                ]),
+                isHighlighted: true,
+                isActive: true,
+                sortOrder: 2,
+                createdAt: new Date(),
+            },
+            {
+                id: this.genId('plan'),
+                name: 'Selamanya',
+                price: '3.500.000',
+                period: '/ sekali bayar',
+                description: 'Investasi sekali untuk pemakaian tanpa batas waktu.',
+                features: JSON.stringify([
+                    'Semua fitur paket Tahunan',
+                    'Tanpa biaya perpanjangan',
+                    'Update fitur gratis',
+                    'Pendampingan onboarding',
+                ]),
+                isHighlighted: false,
+                isActive: true,
+                sortOrder: 3,
+                createdAt: new Date(),
+            },
+        ]);
+    }
+    async ensureSiteSettings() {
+        const existing = await SiteSettingModel.findOne({ where: { id: 'main' } });
+        if (existing)
+            return;
+        await SiteSettingModel.create({
+            id: 'main',
+            whatsappNumber: '6281234567890',
+            whatsappMessageTemplate: 'Halo, saya tertarik dengan paket {paket} Absensi Premium. Mohon informasinya.',
+        });
     }
     async ensureSuperAdminAccount() {
         const salt = bcrypt.genSaltSync(10);
@@ -650,6 +720,82 @@ export class DatabaseService {
             }
         }
         return true;
+    }
+    toPricingPlan(item) {
+        const plain = item.get({ plain: true });
+        let features = [];
+        try {
+            const parsed = JSON.parse(plain.features);
+            features = Array.isArray(parsed) ? parsed : [];
+        }
+        catch {
+            features = [];
+        }
+        return { ...plain, features, createdAt: toISO(plain.createdAt) };
+    }
+    async getPricingPlans(onlyActive = false) {
+        const where = onlyActive ? { isActive: true } : {};
+        const plans = await PricingPlanModel.findAll({ where, order: [['sortOrder', 'ASC'], ['createdAt', 'ASC']] });
+        return plans.map((item) => this.toPricingPlan(item));
+    }
+    async getPricingPlan(id) {
+        const plan = await PricingPlanModel.findByPk(id);
+        return plan ? this.toPricingPlan(plan) : null;
+    }
+    async createPricingPlan(input) {
+        const plan = await PricingPlanModel.create({
+            id: this.genId('plan'),
+            name: input.name.trim(),
+            price: input.price.trim(),
+            period: input.period.trim(),
+            description: input.description.trim(),
+            features: JSON.stringify(input.features),
+            isHighlighted: input.isHighlighted,
+            isActive: input.isActive,
+            sortOrder: input.sortOrder,
+            createdAt: new Date(),
+        });
+        return this.toPricingPlan(plan);
+    }
+    async updatePricingPlan(id, input) {
+        const plan = await PricingPlanModel.findByPk(id);
+        if (!plan)
+            return null;
+        await plan.update({
+            name: input.name.trim(),
+            price: input.price.trim(),
+            period: input.period.trim(),
+            description: input.description.trim(),
+            features: JSON.stringify(input.features),
+            isHighlighted: input.isHighlighted,
+            isActive: input.isActive,
+            sortOrder: input.sortOrder,
+        });
+        return this.toPricingPlan(plan);
+    }
+    async deletePricingPlan(id) {
+        const deleted = await PricingPlanModel.destroy({ where: { id } });
+        return deleted > 0;
+    }
+    async getSiteSettings() {
+        const settings = await SiteSettingModel.findOne({ where: { id: 'main' } });
+        if (!settings) {
+            return { whatsappNumber: '', whatsappMessageTemplate: '' };
+        }
+        const plain = settings.get({ plain: true });
+        return { whatsappNumber: plain.whatsappNumber, whatsappMessageTemplate: plain.whatsappMessageTemplate };
+    }
+    async updateSiteSettings(input) {
+        const [settings] = await SiteSettingModel.findOrCreate({
+            where: { id: 'main' },
+            defaults: { id: 'main', whatsappNumber: input.whatsappNumber.trim(), whatsappMessageTemplate: input.whatsappMessageTemplate.trim() },
+        });
+        await settings.update({
+            whatsappNumber: input.whatsappNumber.trim(),
+            whatsappMessageTemplate: input.whatsappMessageTemplate.trim(),
+        });
+        const plain = settings.get({ plain: true });
+        return { whatsappNumber: plain.whatsappNumber, whatsappMessageTemplate: plain.whatsappMessageTemplate };
     }
 }
 export const db = new DatabaseService();

@@ -33,6 +33,10 @@ export class AssessmentModel extends Model {
 }
 export class StudentGradeModel extends Model {
 }
+export class PricingPlanModel extends Model {
+}
+export class SiteSettingModel extends Model {
+}
 export function initModels() {
     SchoolModel.init({
         id: { type: DataTypes.STRING, primaryKey: true },
@@ -126,6 +130,23 @@ export function initModels() {
         value: { type: DataTypes.FLOAT, allowNull: false },
         createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     }, { sequelize, tableName: 'student_grades', timestamps: false });
+    PricingPlanModel.init({
+        id: { type: DataTypes.STRING, primaryKey: true },
+        name: { type: DataTypes.STRING, allowNull: false },
+        price: { type: DataTypes.STRING, allowNull: false },
+        period: { type: DataTypes.STRING, allowNull: false },
+        description: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+        features: { type: DataTypes.TEXT, allowNull: false, defaultValue: '[]' },
+        isHighlighted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+        isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+        sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+        createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    }, { sequelize, tableName: 'pricing_plans', timestamps: false });
+    SiteSettingModel.init({
+        id: { type: DataTypes.STRING, primaryKey: true },
+        whatsappNumber: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+        whatsappMessageTemplate: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+    }, { sequelize, tableName: 'site_settings', timestamps: false });
     SchoolModel.hasMany(UserModel, { foreignKey: 'schoolId', onDelete: 'CASCADE' });
     SchoolModel.hasMany(ClassModel, { foreignKey: 'schoolId', onDelete: 'CASCADE' });
     SchoolModel.hasMany(StudentModel, { foreignKey: 'schoolId', onDelete: 'CASCADE' });

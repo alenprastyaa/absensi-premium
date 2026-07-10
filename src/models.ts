@@ -124,6 +124,25 @@ export class StudentGradeModel extends Model<InferAttributes<StudentGradeModel>,
   declare createdAt: Date;
 }
 
+export class PricingPlanModel extends Model<InferAttributes<PricingPlanModel>, InferCreationAttributes<PricingPlanModel>> {
+  declare id: string;
+  declare name: string;
+  declare price: string;
+  declare period: string;
+  declare description: string;
+  declare features: string;
+  declare isHighlighted: boolean;
+  declare isActive: boolean;
+  declare sortOrder: number;
+  declare createdAt: Date;
+}
+
+export class SiteSettingModel extends Model<InferAttributes<SiteSettingModel>, InferCreationAttributes<SiteSettingModel>> {
+  declare id: string;
+  declare whatsappNumber: string;
+  declare whatsappMessageTemplate: string;
+}
+
 export function initModels() {
   SchoolModel.init(
     {
@@ -255,6 +274,31 @@ export function initModels() {
       createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     },
     { sequelize, tableName: 'student_grades', timestamps: false }
+  );
+
+  PricingPlanModel.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      name: { type: DataTypes.STRING, allowNull: false },
+      price: { type: DataTypes.STRING, allowNull: false },
+      period: { type: DataTypes.STRING, allowNull: false },
+      description: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+      features: { type: DataTypes.TEXT, allowNull: false, defaultValue: '[]' },
+      isHighlighted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    },
+    { sequelize, tableName: 'pricing_plans', timestamps: false }
+  );
+
+  SiteSettingModel.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      whatsappNumber: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+      whatsappMessageTemplate: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
+    },
+    { sequelize, tableName: 'site_settings', timestamps: false }
   );
 
   SchoolModel.hasMany(UserModel, { foreignKey: 'schoolId', onDelete: 'CASCADE' });
