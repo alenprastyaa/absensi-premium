@@ -1,6 +1,7 @@
 export type SubscriptionPlan = 'bulanan' | 'tahunan' | 'selamanya';
 export type SubscriptionStatus = 'aktif' | 'nonaktif';
-export type UserRole = 'super_admin' | 'admin' | 'teacher';
+// 'parent' = Orang Tua/Siswa: login memakai kredensial siswa, hanya bisa melihat.
+export type UserRole = 'super_admin' | 'admin' | 'teacher' | 'parent';
 export type AttendanceStatus = 'hadir' | 'sakit' | 'izin' | 'alfa';
 export type AttendanceMethod = 'qr' | 'manual';
 
@@ -20,6 +21,7 @@ export interface User {
   role: UserRole;
   name: string;
   initialPassword?: string | null;
+  studentId?: string | null;
   createdAt: string;
 }
 
@@ -126,6 +128,34 @@ export interface AssessmentWithDetails extends Assessment {
   academicYearName: string;
   className: string;
   subjectName: string;
+}
+
+export interface ParentSubjectGrade {
+  academicYearId: string;
+  academicYearName: string;
+  semester: 'ganjil' | 'genap';
+  subjectId: string;
+  subjectName: string;
+  teacherName: string;
+  nhWeight: number;
+  pasWeight: number;
+  nh: Array<{ assessmentId: string; name: string; date: string; value: number | null }>;
+  pas: { assessmentId: string; name: string; date: string; value: number | null } | null;
+  avgNh: number;
+  finalScore: number;
+}
+
+export interface ParentOverview {
+  student: { id: string; name: string; nisn: string; className: string; schoolName: string };
+  attendance: {
+    summary: Record<AttendanceStatus, number> & { total: number; attendanceRate: number };
+    records: Array<{ id: string; date: string; time: string; status: AttendanceStatus; method: AttendanceMethod; className: string }>;
+  };
+  grades: ParentSubjectGrade[];
+  progress: {
+    attendanceByMonth: Array<{ month: string } & Record<AttendanceStatus, number> & { total: number; attendanceRate: number }>;
+    gradesBySemester: Array<{ academicYearName: string; semester: 'ganjil' | 'genap'; averageScore: number; subjectCount: number }>;
+  };
 }
 
 export interface PricingPlan {

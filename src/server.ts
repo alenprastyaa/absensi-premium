@@ -88,10 +88,14 @@ const base64UrlEncode = (value: string) => Buffer.from(value).toString('base64ur
 
 const base64UrlDecode = (value: string) => Buffer.from(value, 'base64url').toString('utf8');
 
-const createSessionToken = (userId: string) => {
+// kind 'student' = sesi Orang Tua/Siswa (sub berisi id siswa, bukan id user).
+type SessionKind = 'user' | 'student';
+
+const createSessionToken = (subjectId: string, kind: SessionKind = 'user') => {
   const payload = {
-    sub: userId,
+    sub: subjectId,
     exp: Date.now() + SESSION_TTL_MS,
+    ...(kind === 'student' ? { kind } : {}),
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = crypto.createHmac('sha256', SESSION_SECRET).update(encodedPayload).digest('base64url');
@@ -111,7 +115,7 @@ const verifySessionToken = (token: string) => {
   }
 
   try {
-    const payload = JSON.parse(base64UrlDecode(encodedPayload)) as { sub?: string; exp?: number };
+    const payload = JSON.parse(base64UrlDecode(encodedPayload)) as { sub?: string; exp?: number; kind?: SessionKind };
     if (!payload.sub || !payload.exp || Date.now() > payload.exp) {
       return null;
     }
@@ -120,6 +124,46 @@ const verifySessionToken = (token: string) => {
   } catch {
     return null;
   }
+};
+
+// Perbandingan password konstan-waktu. Password siswa disimpan apa adanya di
+// kolom initialPassword (skema lama), jadi dibandingkan lewat hash SHA-256.
+const safeEqual = (a: string, b: string) => {
+  const ha = crypto.createHash('sha256').update(a).digest();
+  const hb = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+};
+
+const ATTENDANCE_STATUSES: AttendanceStatus[] = ['hadir', 'sakit', 'izin', 'alfa'];
+
+const countAttendance = (records: Array<{ status: AttendanceStatus }>) => {
+  const counts = { hadir: 0, sakit: 0, izin: 0, alfa: 0 } as Record<AttendanceStatus, number>;
+  for (const record of records) {
+    if (ATTENDANCE_STATUSES.includes(record.status)) counts[record.status] += 1;
+  }
+  const total = records.length;
+  return { ...counts, total, attendanceRate: total > 0 ? Math.round((counts.hadir / total) * 100) : 0 };
+};
+
+// Akun Orang Tua/Siswa tidak punya baris di tabel users; dibentuk dari data siswa.
+const buildParentUser = (student: { id: string; schoolId: string; username: string; name: string; createdAt: string | Date }): DBUser => ({
+  id: student.id,
+  schoolId: student.schoolId,
+  username: student.username,
+  role: 'parent',
+  name: student.name,
+  studentId: student.id,
+  createdAt: new Date(student.createdAt).toISOString(),
+  passwordHash: '',
+});
+
+const resolveSessionUser = async (payload: { sub?: string; kind?: SessionKind }): Promise<DBUser | null> => {
+  if (!payload.sub) return null;
+  if (payload.kind === 'student') {
+    const student = await db.getStudentById(payload.sub);
+    return student ? buildParentUser(student) : null;
+  }
+  return db.getUser(payload.sub);
 };
 
 async function main() {
@@ -144,7 +188,7 @@ async function main() {
       return;
     }
 
-    const liveUser = await db.getUser(payload.sub as string);
+    const liveUser = await resolveSessionUser(payload);
     if (!liveUser) {
       res.status(403).json({ error: 'Sesi kedaluwarsa atau tidak valid.' });
       return;
@@ -186,7 +230,22 @@ async function main() {
 
     const user = await db.getUserByUsername(username);
     if (!user) {
-      res.status(401).json({ error: 'Username atau password salah.' });
+      // Bukan akun guru/admin: coba sebagai Orang Tua/Siswa (kredensial siswa).
+      const candidates = await db.getStudentsByUsername(username);
+      const student = candidates.find((s) => s.initialPassword && safeEqual(password, s.initialPassword));
+      if (!student) {
+        res.status(401).json({ error: 'Username atau password salah.' });
+        return;
+      }
+
+      const school = await db.getSchool(student.schoolId);
+      if (!school || school.subscriptionStatus === 'nonaktif') {
+        res.status(403).json({ error: 'Sekolah Anda dinonaktifkan atau masa langganan habis. Hubungi pihak sekolah.' });
+        return;
+      }
+
+      const parentUser = buildParentUser(student);
+      res.json({ token: createSessionToken(student.id, 'student'), user: getSafeUser(parentUser) });
       return;
     }
 
@@ -223,7 +282,7 @@ async function main() {
       return;
     }
 
-    const user = await db.getUser(payload.sub as string);
+    const user = await resolveSessionUser(payload);
     if (!user) {
       res.status(401).json({ error: 'Session expired' });
       return;
@@ -240,6 +299,11 @@ async function main() {
   app.post('/api/auth/change-password', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     const { oldPassword, newPassword } = req.body;
     const currentUser = req.user!;
+
+    if (currentUser.role === 'parent') {
+      res.status(403).json({ error: 'Akun Orang Tua/Siswa tidak dapat mengubah password. Hubungi wali kelas.' });
+      return;
+    }
 
     if (!oldPassword || !newPassword) {
       res.status(400).json({ error: 'Password lama dan password baru wajib diisi.' });
@@ -1047,6 +1111,143 @@ async function main() {
       assessments,
       students: enrichedStudents,
       grades: allGrades.filter((g) => assessments.map((a) => a.id).includes(g.assessmentId)),
+    });
+  });
+
+  // --- PORTAL ORANG TUA/SISWA (read-only) ---
+  // Hanya ada endpoint GET untuk role 'parent'. Semua endpoint ubah data lain
+  // memakai requireRole tanpa 'parent', jadi otomatis ditolak (403).
+  app.get('/api/parent/overview', authenticateToken, requireRole(['parent']), async (req: AuthenticatedRequest, res) => {
+    const schoolId = req.user!.schoolId!;
+    const studentId = req.user!.studentId!;
+
+    const student = await db.getStudent(studentId, schoolId);
+    if (!student) {
+      res.status(404).json({ error: 'Data siswa tidak ditemukan.' });
+      return;
+    }
+
+    const [school, classes, attendances, studentGrades, allAssessments, subjects, academicYears] = await Promise.all([
+      db.getSchool(schoolId),
+      db.getClasses(schoolId),
+      db.getAttendancesByStudent(studentId, schoolId),
+      db.getStudentGradesByStudent(studentId, schoolId),
+      db.getAssessments(schoolId),
+      db.getSubjects(schoolId),
+      db.getAcademicYears(schoolId),
+    ]);
+
+    const className = (classId: string) => classes.find((c) => c.id === classId)?.name || 'Tanpa Kelas';
+
+    // Absensi
+    const records = attendances.map((att) => ({
+      id: att.id,
+      date: att.date,
+      time: att.time,
+      status: att.status,
+      method: att.method,
+      className: className(att.classId),
+    }));
+
+    const byMonth = new Map<string, typeof records>();
+    for (const record of records) {
+      const month = record.date.slice(0, 7);
+      byMonth.set(month, [...(byMonth.get(month) || []), record]);
+    }
+    const attendanceByMonth = [...byMonth.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, items]) => ({ month, ...countAttendance(items) }));
+
+    // Nilai: penilaian yang sudah ada nilainya untuk siswa ini, plus penilaian
+    // di kelasnya sekarang (yang belum dinilai tampil sebagai "-").
+    const gradeByAssessment = new Map(studentGrades.map((g) => [g.assessmentId, g.value]));
+    const relevantAssessments = allAssessments.filter((a) => gradeByAssessment.has(a.id) || a.classId === student.classId);
+
+    const groups = new Map<string, typeof relevantAssessments>();
+    for (const assessment of relevantAssessments) {
+      const key = `${assessment.academicYearId}|${assessment.semester}|${assessment.subjectId}`;
+      groups.set(key, [...(groups.get(key) || []), assessment]);
+    }
+
+    const yearOrder = (id: string) => {
+      const year = academicYears.find((y) => y.id === id);
+      return year ? new Date(year.createdAt).getTime() : 0;
+    };
+
+    const grades = [];
+    for (const items of groups.values()) {
+      const { academicYearId, semester, subjectId } = items[0];
+      const subject = subjects.find((s) => s.id === subjectId);
+      const weights = await db.findAssessmentWeights(schoolId, subjectId);
+
+      const toEntry = (a: (typeof items)[number]) => ({
+        assessmentId: a.id,
+        name: a.name,
+        date: a.date,
+        value: gradeByAssessment.has(a.id) ? Number(gradeByAssessment.get(a.id)) : null,
+      });
+      const nh = items.filter((a) => a.categoryCode === 'nh').sort((a, b) => a.date.localeCompare(b.date)).map(toEntry);
+      const pasAssessment = items.find((a) => a.categoryCode === 'pas');
+      const pas = pasAssessment ? toEntry(pasAssessment) : null;
+
+      // Rumus sama dengan rekap guru (AcademicModule): nilai kosong dihitung 0.
+      const avgNh = nh.length > 0 ? Math.round(nh.reduce((sum, item) => sum + (item.value ?? 0), 0) / nh.length) : 0;
+      const finalScore = Math.round((avgNh * weights.nh) / 100 + ((pas?.value ?? 0) * weights.pas) / 100);
+
+      grades.push({
+        academicYearId,
+        academicYearName: academicYears.find((y) => y.id === academicYearId)?.name || '-',
+        semester,
+        subjectId,
+        subjectName: subject?.name || 'Mata pelajaran',
+        teacherName: subject?.teacherName || '-',
+        nhWeight: weights.nh,
+        pasWeight: weights.pas,
+        nh,
+        pas,
+        avgNh,
+        finalScore,
+      });
+    }
+
+    const semesterRank = (semester: string) => (semester === 'ganjil' ? 0 : 1);
+    grades.sort(
+      (a, b) =>
+        yearOrder(b.academicYearId) - yearOrder(a.academicYearId) ||
+        semesterRank(b.semester) - semesterRank(a.semester) ||
+        a.subjectName.localeCompare(b.subjectName)
+    );
+
+    // Perkembangan nilai: rata-rata nilai akhir per semester (hanya mapel yang sudah ada nilainya).
+    const semesterMap = new Map<string, { academicYearId: string; academicYearName: string; semester: 'ganjil' | 'genap'; scores: number[] }>();
+    for (const g of grades) {
+      const hasAnyValue = g.nh.some((item) => item.value !== null) || g.pas?.value != null;
+      if (!hasAnyValue) continue;
+      const key = `${g.academicYearId}|${g.semester}`;
+      const entry = semesterMap.get(key) || { academicYearId: g.academicYearId, academicYearName: g.academicYearName, semester: g.semester, scores: [] };
+      entry.scores.push(g.finalScore);
+      semesterMap.set(key, entry);
+    }
+    const gradesBySemester = [...semesterMap.values()]
+      .sort((a, b) => yearOrder(a.academicYearId) - yearOrder(b.academicYearId) || semesterRank(a.semester) - semesterRank(b.semester))
+      .map((entry) => ({
+        academicYearName: entry.academicYearName,
+        semester: entry.semester,
+        averageScore: Math.round(entry.scores.reduce((sum, v) => sum + v, 0) / entry.scores.length),
+        subjectCount: entry.scores.length,
+      }));
+
+    res.json({
+      student: {
+        id: student.id,
+        name: student.name,
+        nisn: student.nisn,
+        className: className(student.classId),
+        schoolName: school?.name || '-',
+      },
+      attendance: { summary: countAttendance(records), records },
+      grades,
+      progress: { attendanceByMonth, gradesBySemester },
     });
   });
 

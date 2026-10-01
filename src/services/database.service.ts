@@ -249,17 +249,9 @@ export class DatabaseService {
       createdAt: new Date(),
     });
 
+    // usr-super sudah dibuat oleh ensureSuperAdminAccount() sebelum seed ini,
+    // jadi tidak dimasukkan lagi (dulu menyebabkan Duplicate entry di DB kosong).
     await UserModel.bulkCreate([
-      {
-        id: 'usr-super',
-        schoolId: null,
-        username: 'superadmin',
-        name: 'Budi Santoso (Super Admin)',
-        role: 'super_admin',
-        initialPassword: 'admin123',
-        passwordHash: defaultPasswordHash,
-        createdAt: new Date(),
-      },
       {
         id: 'usr-admin1',
         schoolId: sampleSchool.id,
@@ -494,6 +486,38 @@ export class DatabaseService {
   async getStudent(id: string, schoolId: string): Promise<Student | null> {
     const student = await StudentModel.findOne({ where: { id, schoolId } });
     return student ? (student.get({ plain: true }) as Student) : null;
+  }
+
+  async getStudentById(id: string): Promise<DBSchoolStudent | null> {
+    const student = await StudentModel.findByPk(id);
+    return student ? (student.get({ plain: true }) as DBSchoolStudent) : null;
+  }
+
+  async getStudentsByUsername(username: string): Promise<DBSchoolStudent[]> {
+    const students = await StudentModel.findAll({ where: { username: username.trim() } });
+    return students.map((item) => item.get({ plain: true })) as DBSchoolStudent[];
+  }
+
+  async getAttendancesByStudent(studentId: string, schoolId: string): Promise<Attendance[]> {
+    return (await AttendanceModel.findAll({ where: { studentId, schoolId }, order: [['date', 'DESC'], ['time', 'DESC']] })).map((item) => item.get({ plain: true })) as Attendance[];
+  }
+
+  async getStudentGradesByStudent(studentId: string, schoolId: string): Promise<StudentGrade[]> {
+    return (await StudentGradeModel.findAll({ where: { studentId, schoolId } })).map((item) => item.get({ plain: true })) as StudentGrade[];
+  }
+
+  // Versi read-only dari getAssessmentWeights: tidak membuat baris bobot baru.
+  // Urutan fallback sama: bobot mapel -> bobot global sekolah -> default.
+  async findAssessmentWeights(schoolId: string, subjectId: string): Promise<{ nh: number; pas: number }> {
+    let rows = await AssessmentWeightModel.findAll({ where: { schoolId, subjectId } });
+    if (rows.length === 0) {
+      rows = await AssessmentWeightModel.findAll({ where: { schoolId, subjectId: null } });
+    }
+    const source = rows.length > 0 ? rows.map((item) => item.get({ plain: true })) : defaultWeights(schoolId, subjectId);
+    return {
+      nh: source.find((w) => w.code === 'nh')?.weight ?? 60,
+      pas: source.find((w) => w.code === 'pas')?.weight ?? 40,
+    };
   }
 
   async getStudentByQrCode(qrCode: string): Promise<Student | null> {

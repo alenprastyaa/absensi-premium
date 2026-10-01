@@ -188,17 +188,9 @@ export class DatabaseService {
             subscriptionStatus: 'aktif',
             createdAt: new Date(),
         });
+        // usr-super sudah dibuat oleh ensureSuperAdminAccount() sebelum seed ini,
+        // jadi tidak dimasukkan lagi (dulu menyebabkan Duplicate entry di DB kosong).
         await UserModel.bulkCreate([
-            {
-                id: 'usr-super',
-                schoolId: null,
-                username: 'superadmin',
-                name: 'Budi Santoso (Super Admin)',
-                role: 'super_admin',
-                initialPassword: 'admin123',
-                passwordHash: defaultPasswordHash,
-                createdAt: new Date(),
-            },
             {
                 id: 'usr-admin1',
                 schoolId: sampleSchool.id,
@@ -395,6 +387,33 @@ export class DatabaseService {
     async getStudent(id, schoolId) {
         const student = await StudentModel.findOne({ where: { id, schoolId } });
         return student ? student.get({ plain: true }) : null;
+    }
+    async getStudentById(id) {
+        const student = await StudentModel.findByPk(id);
+        return student ? student.get({ plain: true }) : null;
+    }
+    async getStudentsByUsername(username) {
+        const students = await StudentModel.findAll({ where: { username: username.trim() } });
+        return students.map((item) => item.get({ plain: true }));
+    }
+    async getAttendancesByStudent(studentId, schoolId) {
+        return (await AttendanceModel.findAll({ where: { studentId, schoolId }, order: [['date', 'DESC'], ['time', 'DESC']] })).map((item) => item.get({ plain: true }));
+    }
+    async getStudentGradesByStudent(studentId, schoolId) {
+        return (await StudentGradeModel.findAll({ where: { studentId, schoolId } })).map((item) => item.get({ plain: true }));
+    }
+    // Versi read-only dari getAssessmentWeights: tidak membuat baris bobot baru.
+    // Urutan fallback sama: bobot mapel -> bobot global sekolah -> default.
+    async findAssessmentWeights(schoolId, subjectId) {
+        let rows = await AssessmentWeightModel.findAll({ where: { schoolId, subjectId } });
+        if (rows.length === 0) {
+            rows = await AssessmentWeightModel.findAll({ where: { schoolId, subjectId: null } });
+        }
+        const source = rows.length > 0 ? rows.map((item) => item.get({ plain: true })) : defaultWeights(schoolId, subjectId);
+        return {
+            nh: source.find((w) => w.code === 'nh')?.weight ?? 60,
+            pas: source.find((w) => w.code === 'pas')?.weight ?? 40,
+        };
     }
     async getStudentByQrCode(qrCode) {
         const student = await StudentModel.findOne({ where: { qrCode } });
